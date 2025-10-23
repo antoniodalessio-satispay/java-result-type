@@ -4,6 +4,7 @@ package com.satispay.utils.resulttype;
 import org.junit.Test;
 
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
+import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 
 public class LazyResultTest {
 
@@ -247,5 +248,237 @@ public class LazyResultTest {
 
         assertThat(result.isSuccess()).isTrue();
         assertThat(result.getData()).isEqualTo(169); // ((5 * 2) + 3)^2 = 13^2 = 169
+    }
+
+    // Tests for new instance methods
+
+    @Test
+    public void shouldUseInstanceMapMethod() {
+        LazyResult<Integer, String> lazyResult = LazyResult.create(
+                () -> 10,
+                ex -> "Error: " + ex.getMessage()
+        );
+
+        LazyResult<String, String> mapped = lazyResult.map(i -> "Value: " + i);
+        Result<String, String> result = mapped.evaluate();
+
+        assertThat(result.isSuccess()).isTrue();
+        assertThat(result.getData()).isEqualTo("Value: 10");
+    }
+
+    @Test
+    public void shouldChainInstanceMapMethods() {
+        LazyResult<Integer, String> lazyResult = LazyResult.create(
+                () -> 5,
+                ex -> "Error"
+        );
+
+        Result<String, String> result = lazyResult
+                .map(i -> i * 2)
+                .map(i -> i + 3)
+                .map(i -> "Result: " + i)
+                .evaluate();
+
+        assertThat(result.isSuccess()).isTrue();
+        assertThat(result.getData()).isEqualTo("Result: 13");
+    }
+
+    @Test
+    public void shouldFlatMapLazyResults() {
+        LazyResult<Integer, String> lazyResult = LazyResult.create(
+                () -> 5,
+                ex -> "Error: " + ex.getMessage()
+        );
+
+        LazyResult<String, String> flatMapped = lazyResult.flatMap(i ->
+                LazyResult.create(
+                        () -> "Value: " + (i * 2),
+                        ex -> "Inner error: " + ex.getMessage()
+                )
+        );
+
+        Result<String, String> result = flatMapped.evaluate();
+
+        assertThat(result.isSuccess()).isTrue();
+        assertThat(result.getData()).isEqualTo("Value: 10");
+    }
+
+    @Test
+    public void shouldHandleFlatMapFailureInFirstOperation() {
+        LazyResult<Integer, String> lazyResult = LazyResult.create(
+                () -> {
+                    throw new RuntimeException("First failed");
+                },
+                ex -> "Error: " + ex.getMessage()
+        );
+
+        LazyResult<String, String> flatMapped = lazyResult.flatMap(i ->
+                LazyResult.create(
+                        () -> "Value: " + i,
+                        ex -> "Inner error"
+                )
+        );
+
+        Result<String, String> result = flatMapped.evaluate();
+
+        assertThat(result.isSuccess()).isFalse();
+        assertThat(result.getError()).isEqualTo("Error: First failed");
+    }
+
+    @Test
+    public void shouldHandleFlatMapFailureInSecondOperation() {
+        LazyResult<Integer, String> lazyResult = LazyResult.create(
+                () -> 5,
+                ex -> "Error: " + ex.getMessage()
+        );
+
+        LazyResult<String, String> flatMapped = lazyResult.flatMap(i ->
+                LazyResult.create(
+                        () -> {
+                            throw new RuntimeException("Second failed");
+                        },
+                        ex -> "Inner error: " + ex.getMessage()
+                )
+        );
+
+        Result<String, String> result = flatMapped.evaluate();
+
+        assertThat(result.isSuccess()).isFalse();
+        // Note: flatMap uses the outer error mapper when the inner operation fails
+        assertThat(result.getError()).isEqualTo("Error: Second failed");
+    }
+
+    @Test
+    public void shouldPeekAtValue() {
+        final int[] peekedValue = {0};
+
+        LazyResult<Integer, String> lazyResult = LazyResult.create(
+                () -> 42,
+                ex -> "Error"
+        );
+
+        Result<Integer, String> result = lazyResult
+                .peek(value -> peekedValue[0] = value)
+                .evaluate();
+
+        assertThat(result.isSuccess()).isTrue();
+        assertThat(result.getData()).isEqualTo(42);
+        assertThat(peekedValue[0]).isEqualTo(42);
+    }
+
+    @Test
+    public void shouldNotPeekOnFailure() {
+        final boolean[] peeked = {false};
+
+        LazyResult<Integer, String> lazyResult = LazyResult.create(
+                () -> {
+                    throw new RuntimeException("Failed");
+                },
+                ex -> "Error"
+        );
+
+        Result<Integer, String> result = lazyResult
+                .peek(value -> peeked[0] = true)
+                .evaluate();
+
+        assertThat(result.isSuccess()).isFalse();
+        assertThat(peeked[0]).isFalse();
+    }
+
+    @Test
+    public void shouldRecoverFromError() {
+        LazyResult<Integer, String> lazyResult = LazyResult.create(
+                () -> {
+                    throw new RuntimeException("Failed");
+                },
+                ex -> "Error: " + ex.getMessage()
+        );
+
+        Result<Integer, String> result = lazyResult
+                .recover(error -> 0)
+                .evaluate();
+
+        assertThat(result.isSuccess()).isTrue();
+        assertThat(result.getData()).isEqualTo(0);
+    }
+
+    @Test
+    public void shouldNotRecoverFromSuccess() {
+        LazyResult<Integer, String> lazyResult = LazyResult.create(
+                () -> 42,
+                ex -> "Error"
+        );
+
+        Result<Integer, String> result = lazyResult
+                .recover(error -> 0)
+                .evaluate();
+
+        assertThat(result.isSuccess()).isTrue();
+        assertThat(result.getData()).isEqualTo(42);
+    }
+
+    @Test
+    public void shouldRecoverWithErrorInformation() {
+        LazyResult<Integer, String> lazyResult = LazyResult.create(
+                () -> {
+                    throw new RuntimeException("Connection failed");
+                },
+                ex -> ex.getMessage()
+        );
+
+        Result<Integer, String> result = lazyResult
+                .recover(error -> error.length())
+                .evaluate();
+
+        assertThat(result.isSuccess()).isTrue();
+        assertThat(result.getData()).isEqualTo(17); // "Connection failed".length()
+    }
+
+    @Test
+    public void shouldThrowExceptionForNullSupplier() {
+        assertThatThrownBy(() -> LazyResult.create(null, ex -> "Error"))
+                .isInstanceOf(NullPointerException.class)
+                .hasMessageContaining("supplier cannot be null");
+    }
+
+    @Test
+    public void shouldThrowExceptionForNullErrorMapper() {
+        assertThatThrownBy(() -> LazyResult.create(() -> 42, null))
+                .isInstanceOf(NullPointerException.class)
+                .hasMessageContaining("errorMapper cannot be null");
+    }
+
+    @Test
+    public void shouldThrowExceptionForNullMapFunction() {
+        LazyResult<Integer, String> lazyResult = LazyResult.create(() -> 42, ex -> "Error");
+
+        assertThatThrownBy(() -> lazyResult.map(null))
+                .isInstanceOf(NullPointerException.class)
+                .hasMessageContaining("mapper cannot be null");
+    }
+
+    @Test
+    public void shouldCombineMultipleOperations() {
+        LazyResult<Integer, String> lazyResult = LazyResult.create(
+                () -> 10,
+                ex -> "Error: " + ex.getMessage()
+        );
+
+        final int[] peekedValue = {0};
+
+        Result<String, String> result = lazyResult
+                .map(i -> i * 2)                    // 20
+                .peek(i -> peekedValue[0] = i)      // peek at 20
+                .map(i -> i + 5)                    // 25
+                .flatMap(i -> LazyResult.create(
+                        () -> i * 2,                // 50
+                        ex -> "Flat error"
+                ))
+                .map(i -> "Final: " + i)
+                .evaluate();
+
+        assertThat(result.isSuccess()).isTrue();
+        assertThat(result.getData()).isEqualTo("Final: 50");
+        assertThat(peekedValue[0]).isEqualTo(20);
     }
 }
