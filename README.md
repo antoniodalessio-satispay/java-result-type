@@ -283,9 +283,6 @@ public class ApiService {
 4. **Evaluate at boundaries**: Evaluate LazyResult at the edges of your application (controllers, main methods)
 5. **Transform errors early**: Use mapError to convert low-level exceptions to domain errors
 
-## License
-
-This project is part of the Satispay engineering toolkit.
 
 ## Contributing
 
